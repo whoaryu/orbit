@@ -36,6 +36,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
   const [isConnecting, setIsConnecting] = useState(true)
   const [chatMessage, setChatMessage] = useState('')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [partnerProfile, setPartnerProfile] = useState<{name?: string; skills?: string[]; lookingFor?: string[]}>({})
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [mediaError, setMediaError] = useState<string | null>(null)
   const [isLoadingMedia, setIsLoadingMedia] = useState(true)
@@ -48,6 +49,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const userIdRef = useRef<string | null>(null)
   const partnerIdRef = useRef<string | null>(null)
+  const sendersRef = useRef<RTCRtpSender[]>([])
 
   // Cleanup function for media streams - ensures camera light turns off
   const cleanupStream = useCallback((stream: MediaStream | null) => {
@@ -366,9 +368,35 @@ const CallScreen: React.FC<CallScreenProps> = ({
       }
     }
 
+    // Handle negotiation when tracks are added later
+    pc.onnegotiationneeded = async () => {
+      try {
+        if (partnerIdRef.current && wsRef.current) {
+          const offer = await pc.createOffer()
+          await pc.setLocalDescription(offer)
+          wsRef.current.send(JSON.stringify({
+            type: 'offer',
+            from: userIdRef.current,
+            to: partnerIdRef.current,
+            data: offer
+          }))
+        }
+      } catch (e) {
+        console.warn('Negotiation failed', e)
+      }
+    }
+
     const attachLocal = () => {
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => pc.addTrack(t, streamRef.current as MediaStream))
+        // Remove previous senders to avoid duplicate tracks
+        sendersRef.current.forEach(s => {
+          try { pc.removeTrack(s) } catch {}
+        })
+        sendersRef.current = []
+        streamRef.current.getTracks().forEach(t => {
+          const sender = pc.addTrack(t, streamRef.current as MediaStream)
+          sendersRef.current.push(sender)
+        })
       }
     }
     attachLocal()
@@ -383,8 +411,10 @@ const CallScreen: React.FC<CallScreenProps> = ({
             type: 'join-queue', 
             from: userIdRef.current, 
             data: {
+              name: userData?.name,
               tags: userData?.lookingFor || [],
-              skills: userData?.skills || []
+              skills: userData?.skills || [],
+              lookingFor: userData?.lookingFor || []
             }
           }))
           break
@@ -392,6 +422,15 @@ const CallScreen: React.FC<CallScreenProps> = ({
         case 'match-found': {
           partnerIdRef.current = payload.partnerId
           setIsConnecting(false)
+          if (payload.partnerProfile) {
+            setPartnerProfile({
+              name: payload.partnerProfile.name,
+              skills: payload.partnerProfile.skills,
+              lookingFor: payload.partnerProfile.lookingFor
+            })
+          } else {
+            setPartnerProfile({})
+          }
           // Offerer: the user with lexicographically smaller id to avoid glare
           if (userIdRef.current && partnerIdRef.current && userIdRef.current < partnerIdRef.current) {
             const offer = await pc.createOffer()
@@ -424,12 +463,24 @@ const CallScreen: React.FC<CallScreenProps> = ({
           // reset and requeue
           partnerIdRef.current = null
           setIsConnecting(true)
+          setPartnerProfile({})
+          try {
+            pcRef.current?.getSenders().forEach(s => { try { pcRef.current?.removeTrack(s) } catch {} })
+            pcRef.current?.close()
+            if (remoteVideoRef.current) (remoteVideoRef.current as HTMLVideoElement).srcObject = null
+          } catch {}
           ws.send(JSON.stringify({ type: 'join-queue', from: userIdRef.current, data: {} }))
           break
         }
         case 'partner-disconnected': {
           partnerIdRef.current = null
           setIsConnecting(true)
+          setPartnerProfile({})
+          try {
+            pcRef.current?.getSenders().forEach(s => { try { pcRef.current?.removeTrack(s) } catch {} })
+            pcRef.current?.close()
+            if (remoteVideoRef.current) (remoteVideoRef.current as HTMLVideoElement).srcObject = null
+          } catch {}
           ws.send(JSON.stringify({ type: 'join-queue', from: userIdRef.current, data: {} }))
           break
         }
@@ -474,6 +525,30 @@ const CallScreen: React.FC<CallScreenProps> = ({
       try { pc.close() } catch {}
     }
   }, [userData])
+
+  // When localStream becomes available later, add tracks and negotiate if needed
+  useEffect(() => {
+    const pc = pcRef.current
+    if (!pc || !localStream) return
+    try {
+      // Remove existing senders
+      sendersRef.current.forEach(s => {
+        try { pc.removeTrack(s) } catch {}
+      })
+      sendersRef.current = []
+      // Add current tracks
+      localStream.getTracks().forEach(t => {
+        const sender = pc.addTrack(t, localStream)
+        sendersRef.current.push(sender)
+      })
+      // Trigger negotiation if already matched
+      if (partnerIdRef.current && wsRef.current) {
+        pc.dispatchEvent(new Event('negotiationneeded'))
+      }
+    } catch (e) {
+      console.warn('Failed to reattach local tracks', e)
+    }
+  }, [localStream])
 
   const handleSendMessage = () => {
     if (chatMessage.trim() && partnerIdRef.current && wsRef.current) {
@@ -640,7 +715,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
                         ? 'bg-slate-900/80 text-white' 
                         : 'bg-white/80 text-slate-900'
                     }`}>
-                      {partnerInfo?.name || 'Anonymous Developer'}
+                      {partnerProfile.name || partnerInfo?.name || 'Anonymous Developer'}
                     </div>
                   </div>
                 </div>
@@ -751,17 +826,19 @@ const CallScreen: React.FC<CallScreenProps> = ({
               <h3 className={`font-semibold transition-colors duration-300 ${
                 isDark ? 'text-white' : 'text-slate-900'
               }`}>
-                {partnerInfo?.name || 'Anonymous Developer'}
+                {partnerProfile.name || partnerInfo?.name || 'Anonymous Developer'}
               </h3>
               <p className={`text-sm transition-colors duration-300 ${
                 isDark ? 'text-slate-400' : 'text-slate-500'
               }`}>
-                {partnerInfo?.experience || 'Developer'}
+                {(partnerProfile.lookingFor && partnerProfile.lookingFor.length > 0)
+                  ? partnerProfile.lookingFor.join(', ')
+                  : (partnerInfo?.experience || 'Developer')}
               </p>
             </div>
             
             <div className="space-y-3">
-              {partnerInfo?.skills && partnerInfo.skills.length > 0 && (
+              {(partnerProfile.skills && partnerProfile.skills.length > 0) || (partnerInfo?.skills && partnerInfo.skills.length > 0) ? (
                 <div>
                   <span className={`text-xs font-medium transition-colors duration-300 ${
                     isDark ? 'text-slate-400' : 'text-slate-500'
@@ -769,7 +846,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
                     Skills:
                   </span>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {partnerInfo.skills.slice(0, 3).map((skill) => (
+                    {(partnerProfile.skills || partnerInfo?.skills || []).slice(0, 3).map((skill) => (
                       <span
                         key={skill}
                         className={`px-2 py-1 rounded-full text-xs transition-colors duration-300 ${
@@ -783,9 +860,9 @@ const CallScreen: React.FC<CallScreenProps> = ({
                     ))}
                   </div>
                 </div>
-              )}
+              ) : null}
               
-              {partnerInfo?.lookingFor && partnerInfo.lookingFor.length > 0 && (
+              {(partnerProfile.lookingFor && partnerProfile.lookingFor.length > 0) || (partnerInfo?.lookingFor && partnerInfo.lookingFor.length > 0) ? (
                 <div>
                   <span className={`text-xs font-medium transition-colors duration-300 ${
                     isDark ? 'text-slate-400' : 'text-slate-500'
@@ -793,7 +870,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
                     Looking for:
                   </span>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {partnerInfo.lookingFor.slice(0, 2).map((item) => (
+                    {(partnerProfile.lookingFor || partnerInfo?.lookingFor || []).slice(0, 2).map((item) => (
                       <span
                         key={item}
                         className={`px-2 py-1 rounded-full text-xs transition-colors duration-300 ${
@@ -807,7 +884,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
                     ))}
                   </div>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
 
