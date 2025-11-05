@@ -9,7 +9,16 @@ import queueRoutes from './routes/queueRoutes';
 import { connectDB } from './config/db';
 import { matchmakingQueue } from './singletons/queue';
 
+// Load environment variables
 dotenv.config();
+
+// Debug: Check if MONGO_URI is loaded (without logging the actual value)
+if (process.env.MONGO_URI) {
+  const uriPreview = process.env.MONGO_URI.substring(0, 20) + '...';
+  console.log('📝 MONGO_URI found:', uriPreview);
+} else {
+  console.log('📝 MONGO_URI not found in .env file');
+}
 
 const app = express();
 const server = createServer(app);
@@ -99,8 +108,11 @@ function handleJoinQueue(userId: string, data: { tags?: string[], skills?: strin
   const user = users.get(userId);
   if (!user) return;
 
-  user.tags = data.tags;
-  user.skills = data.skills;
+  // store basic profile for partner display
+  (user as any).tags = data.tags;
+  (user as any).skills = data.skills;
+  if ((data as any).name) (user as any).name = (data as any).name;
+  if ((data as any).lookingFor) (user as any).lookingFor = (data as any).lookingFor;
   
   matchmakingQueue.addToQueue(userId, data.tags, data.skills);
   
@@ -116,6 +128,21 @@ function handleLeaveQueue(userId: string) {
   matchmakingQueue.removeFromQueue(userId);
   const user = users.get(userId);
   if (user) {
+    // If user was in a call, notify partner and requeue partner
+    if (user.currentPartner) {
+      const partner = users.get(user.currentPartner);
+      if (partner) {
+        try {
+          partner.socket.send(JSON.stringify({
+            type: 'partner-disconnected',
+            from: userId
+          }));
+        } catch {}
+        partner.isInCall = false;
+        partner.currentPartner = undefined;
+        matchmakingQueue.addToQueue(partner.id, (partner as any).tags, (partner as any).skills);
+      }
+    }
     user.isInCall = false;
     user.currentPartner = undefined;
   }
@@ -211,13 +238,25 @@ function createCallSession(user1Id: string, user2Id: string) {
   user1.socket.send(JSON.stringify({
     type: 'match-found',
     partnerId: user2Id,
-    sessionId: sessionId
+    sessionId: sessionId,
+    partnerProfile: {
+      name: (user2 as any).name,
+      skills: (user2 as any).skills,
+      lookingFor: (user2 as any).lookingFor,
+      tags: (user2 as any).tags
+    }
   }));
   
   user2.socket.send(JSON.stringify({
     type: 'match-found',
     partnerId: user1Id,
-    sessionId: sessionId
+    sessionId: sessionId,
+    partnerProfile: {
+      name: (user1 as any).name,
+      skills: (user1 as any).skills,
+      lookingFor: (user1 as any).lookingFor,
+      tags: (user1 as any).tags
+    }
   }));
   
   console.log(`Call session created between ${user1Id} and ${user2Id}`);

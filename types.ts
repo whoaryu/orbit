@@ -3,6 +3,8 @@ export interface User {
   socket: any; // WebSocket instance
   tags?: string[];
   skills?: string[];
+  name?: string;
+  lookingFor?: string[];
   isInCall: boolean;
   currentPartner?: string;
 }
