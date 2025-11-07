@@ -28,7 +28,6 @@ interface ChatMessage {
 const CallScreen: React.FC<CallScreenProps> = ({ 
   isDark, 
   onEndCall, 
-  partnerInfo,
   userData 
 }) => {
   const [isVideoEnabled, setIsVideoEnabled] = useState(true)
@@ -37,6 +36,8 @@ const CallScreen: React.FC<CallScreenProps> = ({
   const [chatMessage, setChatMessage] = useState('')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [partnerProfile, setPartnerProfile] = useState<{name?: string; skills?: string[]; lookingFor?: string[]}>({})
+  const [isChatOpen, setIsChatOpen] = useState(true)
+  const [remoteHasVideo, setRemoteHasVideo] = useState(false)
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [mediaError, setMediaError] = useState<string | null>(null)
   const [isLoadingMedia, setIsLoadingMedia] = useState(true)
@@ -295,6 +296,13 @@ const CallScreen: React.FC<CallScreenProps> = ({
         const [remoteStream] = ev.streams
         if (remoteVideoRef.current && remoteStream) {
           remoteVideoRef.current.srcObject = remoteStream
+      const vt = remoteStream.getVideoTracks()[0]
+      setRemoteHasVideo(!!vt && vt.enabled)
+      if (vt) {
+        vt.onmute = () => setRemoteHasVideo(false)
+        vt.onunmute = () => setRemoteHasVideo(true)
+        vt.onended = () => setRemoteHasVideo(false)
+      }
         }
       }
     } catch (e) {
@@ -350,6 +358,12 @@ const CallScreen: React.FC<CallScreenProps> = ({
     })
     pcRef.current = pc
 
+    // Pre-create transceivers to fix m-line order
+    try {
+      pc.addTransceiver('audio', { direction: 'sendrecv' })
+      pc.addTransceiver('video', { direction: 'sendrecv' })
+    } catch {}
+
     pc.onicecandidate = (e) => {
       if (e.candidate && partnerIdRef.current) {
         ws.send(JSON.stringify({
@@ -368,23 +382,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
       }
     }
 
-    // Handle negotiation when tracks are added later
-    pc.onnegotiationneeded = async () => {
-      try {
-        if (partnerIdRef.current && wsRef.current) {
-          const offer = await pc.createOffer()
-          await pc.setLocalDescription(offer)
-          wsRef.current.send(JSON.stringify({
-            type: 'offer',
-            from: userIdRef.current,
-            to: partnerIdRef.current,
-            data: offer
-          }))
-        }
-      } catch (e) {
-        console.warn('Negotiation failed', e)
-      }
-    }
+    // Remove extra renegotiations; only the chosen offerer will create an offer in match-found
 
     const attachLocal = () => {
       if (streamRef.current) {
@@ -393,7 +391,13 @@ const CallScreen: React.FC<CallScreenProps> = ({
           try { pc.removeTrack(s) } catch {}
         })
         sendersRef.current = []
-        streamRef.current.getTracks().forEach(t => {
+        const audioTracks = streamRef.current.getAudioTracks()
+        const videoTracks = streamRef.current.getVideoTracks()
+        audioTracks.forEach(t => {
+          const sender = pc.addTrack(t, streamRef.current as MediaStream)
+          sendersRef.current.push(sender)
+        })
+        videoTracks.forEach(t => {
           const sender = pc.addTrack(t, streamRef.current as MediaStream)
           sendersRef.current.push(sender)
         })
@@ -469,6 +473,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
             pcRef.current?.close()
             if (remoteVideoRef.current) (remoteVideoRef.current as HTMLVideoElement).srcObject = null
           } catch {}
+          setChatMessages([])
           ws.send(JSON.stringify({ type: 'join-queue', from: userIdRef.current, data: {} }))
           break
         }
@@ -481,6 +486,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
             pcRef.current?.close()
             if (remoteVideoRef.current) (remoteVideoRef.current as HTMLVideoElement).srcObject = null
           } catch {}
+          setChatMessages([])
           ws.send(JSON.stringify({ type: 'join-queue', from: userIdRef.current, data: {} }))
           break
         }
@@ -643,6 +649,26 @@ const CallScreen: React.FC<CallScreenProps> = ({
               
               <div className="flex items-center space-x-3">
                 <button
+                  onClick={() => setIsChatOpen(v => !v)}
+                  className={`px-3 py-2 rounded-lg flex items-center gap-2 transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-800'}`}
+                  title={isChatOpen ? 'Hide Chat' : 'Show Chat'}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h6m-9 8l4-4h10a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12z" />
+                  </svg>
+                  <span className="text-sm font-medium">Chat</span>
+                </button>
+                <button
+                  onClick={() => alert('Reported (stub)')}
+                  className={`p-2 rounded-lg transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-800'}`}
+                  title="Report"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v4m0 4h.01"/>
+                  </svg>
+                </button>
+                <button
                   onClick={handleEndCall}
                   className="p-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
                   title="End Call"
@@ -655,10 +681,10 @@ const CallScreen: React.FC<CallScreenProps> = ({
             </div>
           </div>
 
-          {/* Video Area */}
-          <div className="flex-1 relative m-4 max-h-[calc(100vh-200px)]">
+          {/* Video Area - side-by-side portrait 3:4 rectangles */}
+          <div className="flex-1 m-4 max-h-[calc(100vh-200px)] flex flex-row gap-4 items-stretch">
             {isConnecting ? (
-              <div className="flex items-center justify-center h-full">
+              <div className="flex items-center justify-center flex-1">
                 <div className="text-center">
                   <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
                   <h3 className={`text-xl font-medium mb-2 transition-colors duration-300 ${
@@ -674,7 +700,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
                 </div>
               </div>
             ) : mediaError ? (
-              <div className="flex items-center justify-center h-full">
+              <div className="flex items-center justify-center flex-1">
                 <div className="text-center max-w-md">
                   <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -702,26 +728,39 @@ const CallScreen: React.FC<CallScreenProps> = ({
             ) : (
               <>
                 {/* Remote Video (Partner) */}
-                <div className="w-full h-full rounded-2xl overflow-hidden bg-slate-800 relative">
-                  <video
-                    ref={remoteVideoRef}
-                    className="w-full h-full object-cover"
-                    autoPlay
-                    playsInline
-                  />
-                  <div className="absolute bottom-4 left-4">
-                    <div className={`px-3 py-1 rounded-full text-sm font-medium transition-colors duration-300 ${
-                      isDark 
-                        ? 'bg-slate-900/80 text-white' 
-                        : 'bg-white/80 text-slate-900'
-                    }`}>
-                      {partnerProfile.name || partnerInfo?.name || 'Anonymous Developer'}
+                <div className="flex-1 rounded-2xl overflow-hidden bg-slate-800 relative aspect-[3/4]">
+                  {remoteHasVideo ? (
+                    <video
+                      ref={remoteVideoRef}
+                      className="w-full h-full object-cover"
+                      autoPlay
+                      playsInline
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                        <p className={`${isDark ? 'text-white' : 'text-slate-800'}`}>
+                          {(partnerProfile.name ? `${partnerProfile.name}'s` : "Partner's")} video is off
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  )}
+                  {partnerProfile.name && (
+                    <div className="absolute bottom-4 left-4">
+                      <div className={`px-3 py-1 rounded-full text-sm font-medium transition-colors duration-300 ${
+                        isDark 
+                          ? 'bg-slate-900/80 text-white' 
+                          : 'bg-white/80 text-slate-900'
+                      }`}>
+                        {partnerProfile.name}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Local Video (Self) - Actual camera feed with flip effect */}
-                <div className="absolute top-2 right-2 w-52 h-40 rounded-xl overflow-hidden border-2 border-white shadow-lg">
+                {/* Local Video (Self) */}
+                <div className="flex-1 rounded-2xl overflow-hidden border-2 border-white/20 bg-slate-700 aspect-[3/4]">
                   {isLoadingMedia ? (
                     <div className="w-full h-full bg-slate-700 flex items-center justify-center">
                       <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
@@ -741,7 +780,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3l18 18" />
                         </svg>
-                        <span className="text-white text-sm">Camera Off</span>
+                        <span className="text-white text-sm">Your Camera Off</span>
                       </div>
                     </div>
                   )}
@@ -814,8 +853,8 @@ const CallScreen: React.FC<CallScreenProps> = ({
           </div>
         </div>
 
-        {/* Right Sidebar - Partner Info & Chat */}
-        <div className={`w-80 border-l transition-colors duration-300 flex flex-col h-full ${
+        {/* Right Sidebar - Partner Info & Chat (collapsible) */}
+        <div className={`${isChatOpen ? 'w-80' : 'w-0'} ${isChatOpen ? 'border-l' : ''} transition-all duration-300 overflow-hidden flex flex-col h-full ${
           isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'
         }`}>
           {/* Partner Info Section - Always visible at top */}
@@ -826,19 +865,19 @@ const CallScreen: React.FC<CallScreenProps> = ({
               <h3 className={`font-semibold transition-colors duration-300 ${
                 isDark ? 'text-white' : 'text-slate-900'
               }`}>
-                {partnerProfile.name || partnerInfo?.name || 'Anonymous Developer'}
+                {partnerProfile.name || ''}
               </h3>
               <p className={`text-sm transition-colors duration-300 ${
                 isDark ? 'text-slate-400' : 'text-slate-500'
               }`}>
                 {(partnerProfile.lookingFor && partnerProfile.lookingFor.length > 0)
                   ? partnerProfile.lookingFor.join(', ')
-                  : (partnerInfo?.experience || 'Developer')}
+                  : ''}
               </p>
             </div>
             
             <div className="space-y-3">
-              {(partnerProfile.skills && partnerProfile.skills.length > 0) || (partnerInfo?.skills && partnerInfo.skills.length > 0) ? (
+              {(partnerProfile.skills && partnerProfile.skills.length > 0) ? (
                 <div>
                   <span className={`text-xs font-medium transition-colors duration-300 ${
                     isDark ? 'text-slate-400' : 'text-slate-500'
@@ -846,7 +885,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
                     Skills:
                   </span>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {(partnerProfile.skills || partnerInfo?.skills || []).slice(0, 3).map((skill) => (
+                    {(partnerProfile.skills || []).slice(0, 3).map((skill) => (
                       <span
                         key={skill}
                         className={`px-2 py-1 rounded-full text-xs transition-colors duration-300 ${
@@ -862,7 +901,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
                 </div>
               ) : null}
               
-              {(partnerProfile.lookingFor && partnerProfile.lookingFor.length > 0) || (partnerInfo?.lookingFor && partnerInfo.lookingFor.length > 0) ? (
+              {(partnerProfile.lookingFor && partnerProfile.lookingFor.length > 0) ? (
                 <div>
                   <span className={`text-xs font-medium transition-colors duration-300 ${
                     isDark ? 'text-slate-400' : 'text-slate-500'
@@ -870,7 +909,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
                     Looking for:
                   </span>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {(partnerProfile.lookingFor || partnerInfo?.lookingFor || []).slice(0, 2).map((item) => (
+                    {(partnerProfile.lookingFor || []).slice(0, 2).map((item) => (
                       <span
                         key={item}
                         className={`px-2 py-1 rounded-full text-xs transition-colors duration-300 ${
