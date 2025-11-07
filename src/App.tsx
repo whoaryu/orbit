@@ -125,16 +125,38 @@ function App() {
               </div>
               
               <div className="flex items-center space-x-6">
-                <nav className="hidden md:flex space-x-8">
-                  <a href="#" className={`transition-colors duration-300 font-medium ${
-                    isDark ? 'text-slate-300 hover:text-white' : 'text-slate-600 hover:text-slate-900'
-                  }`}>About</a>
-                  <a href="#" className={`transition-colors duration-300 font-medium ${
-                    isDark ? 'text-slate-300 hover:text-white' : 'text-slate-600 hover:text-slate-900'
-                  }`}>Features</a>
-                  <a href="#" className={`transition-colors duration-300 font-medium ${
-                    isDark ? 'text-slate-300 hover:text-white' : 'text-slate-600 hover:text-slate-900'
-                  }`}>Contact</a>
+                {/* Sponsors */}
+                <nav className="hidden md:flex items-center space-x-5">
+                  <a
+                    href="https://buymeachai.ezee.li/whoaryu"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group inline-flex items-center"
+                    aria-label="Sponsor with Chai"
+                  >
+                    <img
+                      src="/chai.png"
+                      alt="Buy me a Chai"
+                      className={`h-8 w-8 rounded-lg shadow-sm transition-all duration-200 group-hover:scale-110 group-hover:shadow-md ${
+                        isDark ? 'ring-1 ring-slate-600' : 'ring-1 ring-slate-200'
+                      }`}
+                    />
+                  </a>
+                  <a
+                    href="https://buymeacoffee.com/whoaryu"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group inline-flex items-center"
+                    aria-label="Sponsor with Coffee"
+                  >
+                    <img
+                      src="/coffee.png"
+                      alt="Buy me a Coffee"
+                      className={`h-8 w-8 rounded-lg shadow-sm transition-all duration-200 group-hover:scale-110 group-hover:shadow-md ${
+                        isDark ? 'ring-1 ring-slate-600' : 'ring-1 ring-slate-200'
+                      }`}
+                    />
+                  </a>
                 </nav>
                 
                 {/* Dark Mode Toggle */}
