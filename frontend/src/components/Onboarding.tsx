@@ -10,7 +10,7 @@ interface OnboardingProps {
 interface UserData {
   name: string
   skills: string[]
-  companies: string[]
+  company: string
   lookingFor: string[]
   rememberMe: boolean
 }
@@ -19,13 +19,12 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, isDark, initialData
   const [userData, setUserData] = useState<UserData>({
     name: initialData?.name || '',
     skills: initialData?.skills || [],
-    companies: (initialData as any)?.companies || [],
+    company: initialData?.company || (initialData as any)?.companies?.[0] || '',
     lookingFor: initialData?.lookingFor || [],
     rememberMe: initialData?.rememberMe || false
   })
 
   const [tempSkill, setTempSkill] = useState('')
-  const [tempCompany, setTempCompany] = useState('')
   const [nameError, setNameError] = useState('')
   const [skillError, setSkillError] = useState('')
   const [companyError, setCompanyError] = useState('')
@@ -54,14 +53,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, isDark, initialData
     return ''
   }
 
-  const validateCompany = (company: string): string => {
-    if (!company.trim()) return 'Company cannot be empty'
-    if (company.trim().length < 2) return 'Company must be at least 2 characters'
-    if (company.trim().length > 50) return 'Company must be less than 50 characters'
-    if (userData.companies.includes(company.trim())) return 'Company already added'
-    return ''
-  }
-
   const addSkill = () => {
     const error = validateSkill(tempSkill)
     if (error) {
@@ -79,23 +70,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, isDark, initialData
     setUserData(prev => ({ ...prev, skills: prev.skills.filter(s => s !== skill) }))
   }
 
-  const addCompany = () => {
-    const error = validateCompany(tempCompany)
-    if (error) {
-      setCompanyError(error)
-      return
-    }
-    
-    setUserData(prev => ({ ...prev, companies: [...prev.companies, tempCompany.trim()] }))
-    setTempCompany('')
-    setCompanyError('')
-    setTimeout(() => companyInputRef.current?.focus(), 100)
-  }
-
-  const removeCompany = (company: string) => {
-    setUserData(prev => ({ ...prev, companies: prev.companies.filter(c => c !== company) }))
-  }
-
   const handleSkillKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -103,16 +77,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, isDark, initialData
     } else if (e.key === 'Backspace' && tempSkill === '' && userData.skills.length > 0) {
       e.preventDefault()
       setUserData(prev => ({ ...prev, skills: prev.skills.slice(0, -1) }))
-    }
-  }
-
-  const handleCompanyKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      addCompany()
-    } else if (e.key === 'Backspace' && tempCompany === '' && userData.companies.length > 0) {
-      e.preventDefault()
-      setUserData(prev => ({ ...prev, companies: prev.companies.slice(0, -1) }))
     }
   }
 
@@ -151,12 +115,12 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, isDark, initialData
   }
 
   const handleCompanyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const company = e.target.value
-    setTempCompany(company)
-    
-    if (companyError) {
-      const error = validateCompany(company)
-      setCompanyError(error)
+    const value = e.target.value
+    setUserData(prev => ({ ...prev, company: value }))
+    if (value.trim().length > 50) {
+      setCompanyError('Company name must be less than 50 characters')
+    } else {
+      setCompanyError('')
     }
   }
 
@@ -301,6 +265,30 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, isDark, initialData
                 )}
               </div>
               
+              {/* Skill Hints */}
+              <div className="flex flex-wrap items-center gap-1.5 mt-2 text-xs">
+                <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>Try:</span>
+                {['MERN', 'Python', 'TypeScript', 'Next.js', 'AI / ML', 'Rust'].map(skill => (
+                  <button
+                    key={skill}
+                    type="button"
+                    onClick={() => {
+                      if (!userData.skills.includes(skill)) {
+                        setUserData(prev => ({ ...prev, skills: [...prev.skills, skill] }))
+                        setSkillError('')
+                      }
+                    }}
+                    className={`px-2 py-1 rounded-md transition-all duration-200 cursor-pointer ${
+                      isDark 
+                        ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/50' 
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200/50'
+                    }`}
+                  >
+                    +{skill}
+                  </button>
+                ))}
+              </div>
+              
               {userData.skills.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-3">
                   {userData.skills.map((skill) => (
@@ -315,7 +303,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, isDark, initialData
                       {skill}
                       <button
                         onClick={() => removeSkill(skill)}
-                        className="ml-2 hover:text-red-400 transition-colors"
+                        className="ml-2 hover:text-red-400 transition-colors cursor-pointer"
                       >
                         ×
                       </button>
@@ -325,16 +313,15 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, isDark, initialData
               )}
             </div>
 
-            {/* Companies */}
+            {/* Work */}
             <div>
               <div className="relative">
                 <input
                   ref={companyInputRef}
                   type="text"
-                  value={tempCompany}
+                  value={userData.company}
                   onChange={handleCompanyChange}
-                  onKeyDown={handleCompanyKeyDown}
-                  placeholder="Where do you work? (press Enter)"
+                  placeholder="Where do you work?"
                   className={`w-full px-4 py-3 rounded-xl border transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-400/20 ${
                     isDark 
                       ? 'bg-gray-700/50 border-gray-600 text-white placeholder-gray-400' 
@@ -346,28 +333,27 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, isDark, initialData
                 )}
               </div>
               
-              {userData.companies.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-3">
-                  {userData.companies.map((company) => (
-                    <span
-                      key={company}
-                      className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium transition-colors duration-200 ${
-                        isDark 
-                          ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30' 
-                          : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                      }`}
-                    >
-                      {company}
-                      <button
-                        onClick={() => removeCompany(company)}
-                        className="ml-2 hover:text-red-400 transition-colors"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
+              {/* Work Hints */}
+              <div className="flex flex-wrap items-center gap-1.5 mt-2 text-xs">
+                <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>Try:</span>
+                {['Google', 'Meta', 'Microsoft', 'Netflix', 'Student', 'Freelancer'].map(comp => (
+                  <button
+                    key={comp}
+                    type="button"
+                    onClick={() => {
+                      setUserData(prev => ({ ...prev, company: comp }))
+                      setCompanyError('')
+                    }}
+                    className={`px-2 py-1 rounded-md transition-all duration-200 cursor-pointer ${
+                      isDark 
+                        ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/50' 
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200/50'
+                    }`}
+                  >
+                    {comp}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Looking For */}

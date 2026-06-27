@@ -3,7 +3,7 @@ import { useState } from 'react'
 export interface UserData {
   name: string
   skills: string[]
-  companies: string[]
+  company: string
   lookingFor: string[]
   rememberMe: boolean
 }
@@ -19,7 +19,11 @@ export const useUserData = () => {
         const parsed = JSON.parse(stored)
         // Only restore if rememberMe was true
         if (parsed.rememberMe) {
-          return parsed
+          if (parsed.companies && !parsed.company) {
+            parsed.company = parsed.companies[0] || ''
+            delete parsed.companies
+          }
+          return parsed as UserData
         }
       }
     } catch (error) {

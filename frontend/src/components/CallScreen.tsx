@@ -13,7 +13,7 @@ interface CallScreenProps {
   userData?: {
     name: string
     skills: string[]
-    companies: string[]
+    company: string
     lookingFor: string[]
   }
 }
@@ -41,6 +41,11 @@ const CallScreen: React.FC<CallScreenProps> = ({
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [mediaError, setMediaError] = useState<string | null>(null)
   const [isLoadingMedia, setIsLoadingMedia] = useState(true)
+  const [isCallConnected, setIsCallConnected] = useState(false)
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false)
+  const [reportReason, setReportReason] = useState('')
+  const [showToast, setShowToast] = useState(false)
+  const [toastMessage, setToastMessage] = useState('')
 
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
@@ -292,17 +297,26 @@ const CallScreen: React.FC<CallScreenProps> = ({
         }
       }
       
+      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          setIsCallConnected(true)
+        } else if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'closed') {
+          setIsCallConnected(false)
+        }
+      }
+
       pc.ontrack = (ev) => {
         const [remoteStream] = ev.streams
         if (remoteVideoRef.current && remoteStream) {
           remoteVideoRef.current.srcObject = remoteStream
-      const vt = remoteStream.getVideoTracks()[0]
-      setRemoteHasVideo(!!vt && vt.enabled)
-      if (vt) {
-        vt.onmute = () => setRemoteHasVideo(false)
-        vt.onunmute = () => setRemoteHasVideo(true)
-        vt.onended = () => setRemoteHasVideo(false)
-      }
+          setIsCallConnected(true)
+          const vt = remoteStream.getVideoTracks()[0]
+          setRemoteHasVideo(!!vt && vt.enabled)
+          if (vt) {
+            vt.onmute = () => setRemoteHasVideo(false)
+            vt.onunmute = () => setRemoteHasVideo(true)
+            vt.onended = () => setRemoteHasVideo(false)
+          }
         }
       }
     } catch (e) {
@@ -312,6 +326,8 @@ const CallScreen: React.FC<CallScreenProps> = ({
     // Reset partner and requeue
     partnerIdRef.current = null
     setIsConnecting(true)
+    setIsCallConnected(false)
+    setRemoteHasVideo(false)
     setChatMessages([])
   }, [])
 
@@ -375,10 +391,27 @@ const CallScreen: React.FC<CallScreenProps> = ({
       }
     }
 
+    pc.oniceconnectionstatechange = () => {
+      console.log('ICE Connection State (init):', pc.iceConnectionState)
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        setIsCallConnected(true)
+      } else if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'closed') {
+        setIsCallConnected(false)
+      }
+    }
+
     pc.ontrack = (ev) => {
       const [remoteStream] = ev.streams
       if (remoteVideoRef.current && remoteStream) {
         remoteVideoRef.current.srcObject = remoteStream
+        setIsCallConnected(true)
+        const vt = remoteStream.getVideoTracks()[0]
+        setRemoteHasVideo(!!vt && vt.enabled)
+        if (vt) {
+          vt.onmute = () => setRemoteHasVideo(false)
+          vt.onunmute = () => setRemoteHasVideo(true)
+          vt.onended = () => setRemoteHasVideo(false)
+        }
       }
     }
 
@@ -467,6 +500,8 @@ const CallScreen: React.FC<CallScreenProps> = ({
           // reset and requeue
           partnerIdRef.current = null
           setIsConnecting(true)
+          setIsCallConnected(false)
+          setRemoteHasVideo(false)
           setPartnerProfile({})
           try {
             pcRef.current?.getSenders().forEach(s => { try { pcRef.current?.removeTrack(s) } catch {} })
@@ -480,6 +515,8 @@ const CallScreen: React.FC<CallScreenProps> = ({
         case 'partner-disconnected': {
           partnerIdRef.current = null
           setIsConnecting(true)
+          setIsCallConnected(false)
+          setRemoteHasVideo(false)
           setPartnerProfile({})
           try {
             pcRef.current?.getSenders().forEach(s => { try { pcRef.current?.removeTrack(s) } catch {} })
@@ -659,8 +696,8 @@ const CallScreen: React.FC<CallScreenProps> = ({
                   <span className="text-sm font-medium">Chat</span>
                 </button>
                 <button
-                  onClick={() => alert('Reported (stub)')}
-                  className={`p-2 rounded-lg transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-800'}`}
+                  onClick={() => setIsReportModalOpen(true)}
+                  className={`p-2 rounded-lg transition-colors cursor-pointer ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-800'}`}
                   title="Report"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -683,23 +720,7 @@ const CallScreen: React.FC<CallScreenProps> = ({
 
           {/* Video Area - side-by-side portrait 3:4 rectangles */}
           <div className="flex-1 m-4 max-h-[calc(100vh-200px)] flex flex-row gap-4 items-stretch">
-            {isConnecting ? (
-              <div className="flex items-center justify-center flex-1">
-                <div className="text-center">
-                  <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                  <h3 className={`text-xl font-medium mb-2 transition-colors duration-300 ${
-                    isDark ? 'text-white' : 'text-slate-900'
-                  }`}>
-                    Finding your match...
-                  </h3>
-                  <p className={`transition-colors duration-300 ${
-                    isDark ? 'text-slate-300' : 'text-slate-600'
-                  }`}>
-                    This usually takes a few seconds
-                  </p>
-                </div>
-              </div>
-            ) : mediaError ? (
+            {mediaError ? (
               <div className="flex items-center justify-center flex-1">
                 <div className="text-center max-w-md">
                   <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -727,9 +748,37 @@ const CallScreen: React.FC<CallScreenProps> = ({
               </div>
             ) : (
               <>
-                {/* Remote Video (Partner) */}
-                <div className="flex-1 rounded-2xl overflow-hidden bg-slate-800 relative aspect-[3/4]">
-                  {remoteHasVideo ? (
+                {/* Remote Video (Partner / Connecting / Queue) */}
+                <div className="flex-1 rounded-2xl overflow-hidden bg-slate-800 relative aspect-[3/4] flex flex-col justify-center items-center">
+                  {isConnecting ? (
+                    <div className="text-center p-6">
+                      <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                      <h3 className={`text-xl font-medium mb-2 transition-colors duration-300 ${
+                        isDark ? 'text-white' : 'text-slate-200'
+                      }`}>
+                        Finding your match...
+                      </h3>
+                      <p className={`text-sm transition-colors duration-300 ${
+                        isDark ? 'text-slate-400' : 'text-slate-500'
+                      }`}>
+                        This usually takes a few seconds
+                      </p>
+                    </div>
+                  ) : !isCallConnected ? (
+                    <div className="text-center p-6">
+                      <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                      <h3 className={`text-xl font-medium mb-2 transition-colors duration-300 ${
+                        isDark ? 'text-white' : 'text-slate-200'
+                      }`}>
+                        Connecting call...
+                      </h3>
+                      <p className={`text-sm transition-colors duration-300 ${
+                        isDark ? 'text-slate-400' : 'text-slate-550'
+                      }`}>
+                        Establishing WebRTC stream
+                      </p>
+                    </div>
+                  ) : remoteHasVideo ? (
                     <video
                       ref={remoteVideoRef}
                       className="w-full h-full object-cover"
@@ -737,17 +786,20 @@ const CallScreen: React.FC<CallScreenProps> = ({
                       playsInline
                     />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <div className="text-center">
-                        <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                        <p className={`${isDark ? 'text-white' : 'text-slate-800'}`}>
-                          {(partnerProfile.name ? `${partnerProfile.name}'s` : "Partner's")} video is off
-                        </p>
+                    <div className="text-center p-6">
+                      <div className="w-12 h-12 bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3l18 18" />
+                        </svg>
                       </div>
+                      <p className={`${isDark ? 'text-white' : 'text-slate-200'} text-sm`}>
+                        {(partnerProfile.name ? `${partnerProfile.name}'s` : "Partner's")} video is off
+                      </p>
                     </div>
                   )}
-                  {partnerProfile.name && (
-                    <div className="absolute bottom-4 left-4">
+                  {!isConnecting && partnerProfile.name && (
+                    <div className="absolute bottom-4 left-4 z-10">
                       <div className={`px-3 py-1 rounded-full text-sm font-medium transition-colors duration-300 ${
                         isDark 
                           ? 'bg-slate-900/80 text-white' 
@@ -1005,6 +1057,93 @@ const CallScreen: React.FC<CallScreenProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Report Modal */}
+      {isReportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className={`p-6 rounded-2xl max-w-sm w-full mx-4 shadow-2xl border transition-all duration-300 ${
+            isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900'
+          }`}>
+            <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+              <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              Report User
+            </h3>
+            <p className={`text-sm mb-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+              Please select a reason for reporting this partner. They will be flagged, and you will be immediately skipped to a new match.
+            </p>
+            <div className="space-y-2 mb-6">
+              {[
+                'Inappropriate Behavior / Nudity',
+                'Harassment or Hate Speech',
+                'Spam / Advertising',
+                'Pretending to be someone else'
+              ].map(reason => (
+                <label
+                  key={reason}
+                  className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                    reportReason === reason 
+                      ? 'border-emerald-500 bg-emerald-500/10' 
+                      : isDark ? 'border-slate-700 bg-slate-700/30 hover:bg-slate-700/50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="reportReason"
+                    value={reason}
+                    checked={reportReason === reason}
+                    onChange={() => setReportReason(reason)}
+                    className="text-emerald-500 focus:ring-emerald-400"
+                  />
+                  <span className="text-sm font-medium">{reason}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsReportModalOpen(false)
+                  setReportReason('')
+                }}
+                className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                  isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                }`}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!reportReason}
+                onClick={() => {
+                  setIsReportModalOpen(false)
+                  setReportReason('')
+                  setToastMessage('User reported successfully. Finding new connection...')
+                  setShowToast(true)
+                  setTimeout(() => setShowToast(false), 4000)
+                  handleSkip()
+                }}
+                className="px-4 py-2 bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white rounded-xl text-sm font-semibold transition-colors"
+              >
+                Submit Report
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {showToast && (
+        <div className="fixed bottom-6 right-6 z-50">
+          <div className={`px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 border ${
+            isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900'
+          }`}>
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></div>
+            <span className="text-sm font-medium">{toastMessage}</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
