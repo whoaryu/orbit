@@ -1,0 +1,72 @@
+
+1. High: Re-match flow can break after skip/disconnect due stale RTCPeerConnection usage
+- Evidence:
+  - New peer connection is created in skip handler at CallScreen.tsx.
+  - Message handlers still use the older captured pc instance created in effect at CallScreen.tsx.
+  - Signaling operations are applied to captured pc, not pcRef.current, at CallScreen.tsx, CallScreen.tsx, CallScreen.tsx.
+  - On partner skip/disconnect, connection is closed and queue rejoined at CallScreen.tsx and CallScreen.tsx, but there is no robust re-init path for the same message-handler context.
+- Risk: intermittent failed second/third matches, broken ICE/offer-answer after skip.
+
+2. High: Call session lifecycle is incomplete (memory growth + inaccurate active call metric)
+- Evidence:
+  - Sessions are only created and stored at server.ts.
+  - Health endpoint reports active calls from isActive at server.ts.
+  - No session deactivation/deletion path exists in disconnect/leave/skip flows.
+- Risk: active call count drifts over time, unbounded in-memory session map.
+
+3. High: Product promise mismatch: tag/skill matching not actually implemented
+- Evidence:
+  - README promises tag/skill matching at README.md and README.md.
+  - Queue uses FIFO and explicitly says tag matching is TODO at queue.ts.
+- Risk: core feature expectation gap for users/investors/testing.
+
+4. Medium: CORS is fully open in all environments
+- Evidence:
+  - Origin config currently resolves to allow-all at server.ts.
+- Risk: easier abuse from untrusted origins, harder to enforce deployment boundaries.
+
+5. Medium: Queue REST endpoints are unauthenticated and trust client userId
+- Evidence:
+  - Public routes at queueRoutes.ts, queueRoutes.ts, queueRoutes.ts.
+  - Controller accepts arbitrary userId body at queueController.ts, queueController.ts, queueController.ts.
+- Risk: queue poisoning/spoofing if endpoints are exposed publicly.
+
+6. Medium: Auto-reconnect is claimed but not truly implemented in frontend
+- Evidence:
+  - README claims robust reconnection at README.md.
+  - WebSocket close handler only logs and comments about remount at CallScreen.tsx, CallScreen.tsx.
+- Risk: degraded reliability on transient network issues.
+
+7. Medium: Responsive claim conflicts with forced mobile fallback
+- Evidence:
+  - README says responsive UI at README.md.
+  - App routes all <=768px users to fallback at App.tsx, App.tsx, App.tsx.
+- Risk: feature not available on mobile despite marketing copy.
+
+8. Low: Sensitive-ish environment logging and config hygiene
+- Evidence:
+  - Partial MONGO_URI logging at server.ts, server.ts.
+  - Hardcoded ngrok host in Vite allowedHosts at vite.config.ts.
+- Risk: accidental leakage/context coupling across environments.
+
+9. Low: Testing/dep hygiene incomplete
+- Evidence:
+  - Backend test script is placeholder at package.json.
+  - Several backend auth-related deps appear unused by code path: package.json, package.json, package.json, package.json.
+- Risk: maintenance overhead and unclear security model.
+
+What is complete already
+- Core WebSocket signaling path exists.
+- WebRTC setup, chat messages, skip, and partner profile transfer are implemented.
+- UI quality is good for desktop.
+- No current IDE diagnostics were reported via static error check.
+
+What should be added next (priority features)
+1. Real matchmaking score engine (tags, skills, lookingFor overlap, wait-time boost, anti-repeat partner logic).
+2. Reliable reconnect/resume strategy (WS exponential backoff, rejoin queue, recover peer connection state).
+3. Session lifecycle persistence (store call start/end, duration, report events; cleanup memory map).
+4. Moderation backend for reports (persist report reason, thresholds, temporary blocks).
+5. Security baseline (origin allowlist by env, rate limit, input validation schemas, optional auth token per socket).
+6. TURN support for NAT traversal (STUN-only fails for many users in restrictive networks).
+7. Observability (structured logs, correlation IDs, basic metrics for queue time, match success, call failure reasons).
+8. Contract alignment: either implement mobile call flow or update README to explicitly say desktop-only for now.
